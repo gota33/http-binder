@@ -42,37 +42,27 @@ func (b input) BindInput(req *http.Request, v any) (err error) {
 		defer func() { _ = req.Body.Close() }()
 	}
 
-	switch GetContentType(req.Header.Get("Content-Type")) {
-	case ContentTypeForm:
-		err = req.ParseForm()
-	case ContentTypeJSON:
-		err = json.NewDecoder(req.Body).Decode(v)
-	case ContentTypeXML:
-		err = xml.NewDecoder(req.Body).Decode(v)
-	}
-	if err != nil {
-		return
-	}
-
 	acc, err := NewAccessor(v)
 	if err != nil {
 		return
 	}
 
-	if err = b.bindValues(acc, TagQuery, req.URL.Query()); err != nil {
-		return
+	var bodyErr error
+	switch GetContentType(req.Header.Get("Content-Type")) {
+	case ContentTypeForm:
+		bodyErr = req.ParseForm()
+	case ContentTypeJSON:
+		bodyErr = json.NewDecoder(req.Body).Decode(v)
+	case ContentTypeXML:
+		bodyErr = xml.NewDecoder(req.Body).Decode(v)
 	}
-	if err = b.bindValues(acc, TagForm, req.PostForm); err != nil {
-		return
-	}
-	if err = b.bindHeader(acc, req.Header); err != nil {
-		return
-	}
-	if err = b.bindUriParam(acc, req); err != nil {
-		return
-	}
-
-	return
+	return errors.Join(
+		bodyErr,
+		b.bindValues(acc, TagQuery, req.URL.Query()),
+		b.bindValues(acc, TagForm, req.PostForm),
+		b.bindHeader(acc, req.Header),
+		b.bindUriParam(acc, req),
+	)
 }
 
 func (b input) bindValues(acc Accessor, tagType TagType, values url.Values) error {
