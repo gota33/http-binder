@@ -11,6 +11,8 @@ import (
 	. "github.com/gota33/http-binder/internal"
 )
 
+type StringSliceUnmarshaler = IStringSliceUnmarshaler
+
 type UriParamGetter func(req *http.Request, key string) string
 
 type Input interface {

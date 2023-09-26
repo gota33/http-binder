@@ -24,7 +24,13 @@ var (
 	}
 )
 
-type Setters map[TagType]map[string][]reflect.Value
+type IStringSliceUnmarshaler interface {
+	UnmarshalStringSlice(values []string) error
+}
+
+var RTStringSliceUnmarshaler = reflect.TypeOf((*IStringSliceUnmarshaler)(nil)).Elem()
+
+type Setters map[TagType]map[string][]IStringSliceUnmarshaler
 
 type Accessor struct {
 	setters Setters
@@ -38,7 +44,7 @@ func NewAccessor(target any, tags ...TagType) (out Accessor, err error) {
 
 	setters := make(Setters, size)
 	for _, tag := range tags {
-		setters[tag] = make(map[string][]reflect.Value)
+		setters[tag] = make(map[string][]IStringSliceUnmarshaler)
 	}
 
 	rv := reflect.ValueOf(target)
@@ -85,10 +91,12 @@ func travel(setters Setters, rv reflect.Value) (err error) {
 		// Process exported string or []string field
 		for tagType, mapper := range setters {
 			if v, ok := field.Tag.Lookup(string(tagType)); ok {
-				if err = ensureFieldType(field); err != nil {
+				var setter IStringSliceUnmarshaler
+				if setter, err = getSetter(rv.Field(i)); err != nil {
+					err = fmt.Errorf("field %q: %w", field.Name, err)
 					return
 				}
-				mapper[v] = append(mapper[v], rv.Field(i))
+				mapper[v] = append(mapper[v], setter)
 				continue
 			}
 		}
@@ -114,27 +122,58 @@ func (a Accessor) Set(tag TagType, field string, values ...string) (err error) {
 	}
 
 	for _, setter := range arr {
-		var rv reflect.Value
-		switch setter.Kind() {
-		case reflect.Pointer:
-			rv = reflect.ValueOf(&values[0])
-		case reflect.String:
-			rv = reflect.ValueOf(values[0])
-		case reflect.Slice:
-			rv = reflect.ValueOf(values)
+		if err = setter.UnmarshalStringSlice(values); err != nil {
+			return
 		}
-		setter.Set(rv)
 	}
 	return
 }
 
-func ensureFieldType(field reflect.StructField) (err error) {
-	kind := field.Type.Kind()
-	if kind == reflect.Pointer {
-		kind = field.Type.Elem().Kind()
+func getSetter(field reflect.Value) (setter IStringSliceUnmarshaler, err error) {
+	// Convert to value type if it's a pointer
+	rt := field.Type()
+	rv := field
+	if kind := rt.Kind(); kind == reflect.Pointer {
+		rt = field.Type().Elem()
+		rv = field.Elem()
 	}
-	if kind != reflect.String && kind != reflect.Slice {
-		return fmt.Errorf("field %q must be string or []string: %w", field.Name, ErrInvalidTarget)
+
+	// Return if it implements StringSliceUnmarshaler
+	if reflect.PointerTo(rt).Implements(RTStringSliceUnmarshaler) {
+		setter = rv.Addr().Interface().(IStringSliceUnmarshaler)
+		return
+	}
+
+	// Otherwise only accept string or []string
+	if kind := rt.Kind(); kind != reflect.String && kind != reflect.Slice {
+		err = fmt.Errorf("field must be string or []string: %w", ErrInvalidTarget)
+		return
+	}
+
+	setter = FieldBinder{rv: field}
+	return
+}
+
+type FieldBinder struct {
+	rv reflect.Value
+}
+
+func (b FieldBinder) UnmarshalStringSlice(values []string) (err error) {
+	if len(values) == 0 {
+		return
+	}
+
+	var target any
+	switch b.rv.Type().Kind() {
+	case reflect.Pointer:
+		target = &values[0]
+	case reflect.String:
+		target = values[0]
+	case reflect.Slice:
+		target = values
+	}
+	if target != nil {
+		b.rv.Set(reflect.ValueOf(target))
 	}
 	return
 }

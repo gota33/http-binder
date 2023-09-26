@@ -2,6 +2,7 @@ package internal
 
 import (
 	"encoding/json"
+	"strconv"
 	"testing"
 
 	. "github.com/stretchr/testify/require"
@@ -9,9 +10,9 @@ import (
 
 func TestAccessor(t *testing.T) {
 	type QueryInner struct {
-		Q0 string `query:"q0"`
-		Q2 string `query:"q2"`
-		Q3 string `query:"q3"`
+		Q0 string  `query:"q0"`
+		Q2 string  `query:"q2"`
+		Q3 Integer `query:"q3"`
 	}
 	type FormInner struct {
 		F0 string `form:"f0"`
@@ -27,6 +28,7 @@ func TestAccessor(t *testing.T) {
 		Arr []string `query:"arr"`
 		QueryInner
 		FormInner
+		UriInner
 	}
 
 	var r Result
@@ -47,7 +49,7 @@ func TestAccessor(t *testing.T) {
 	NoError(t, acc.Set(TagQuery, "q0", "q0"))
 	NoError(t, acc.Set(TagQuery, "q1", "q1"))
 	NoError(t, acc.Set(TagQuery, "q2", "q2"))
-	NoError(t, acc.Set(TagQuery, "q3", "q3"))
+	NoError(t, acc.Set(TagQuery, "q3", "1"))
 	NoError(t, acc.Set(TagForm, "f0", "f0"))
 	NoError(t, acc.Set(TagForm, "f1", "f1"))
 	NoError(t, acc.Set(TagUri, "u0", "u0"))
@@ -59,4 +61,20 @@ func TestAccessor(t *testing.T) {
 	NoError(t, err)
 
 	t.Logf("%s", data)
+}
+
+type Integer int
+
+func (n *Integer) UnmarshalStringSlice(values []string) (err error) {
+	if len(values) == 0 {
+		return
+	}
+
+	num, err := strconv.ParseInt(values[0], 10, 64)
+	if err != nil {
+		return
+	}
+
+	*n = Integer(num)
+	return
 }
